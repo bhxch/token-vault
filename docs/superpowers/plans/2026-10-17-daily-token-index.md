@@ -1,4 +1,4 @@
-# token-inbox 每日编号重设计 实施计划
+# token-vault 每日编号重设计 实施计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -36,7 +36,7 @@ import { todayPrefix, pad3, planEvict } from './register';
 文件末尾（最外层 describe 之后）追加：
 
 ```ts
-describe('token-inbox 纯函数', () => {
+describe('token-vault 纯函数', () => {
   test('todayPrefix：本地日期 YYYYMMDD', async () => {
     expect(todayPrefix(new Date('2026-10-17T15:00:00'))).toBe('20261017');
     expect(todayPrefix(new Date('2026-01-02T00:30:00'))).toBe('20260102');
@@ -115,7 +115,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 - [ ] **Step 1: 更新测试（先让它失败）**
 
-用例 1「带 token 的消息」：把 `expect(r.text).toContain('token-inbox');` 替换为：
+用例 1「带 token 的消息」：把 `expect(r.text).toContain('token-vault');` 替换为：
 
 ```ts
     expect(r.text).toContain(`${todayPrefix()}-001已入箱脱敏`);
@@ -205,7 +205,7 @@ Expected: FAIL——旧实现占位符是 `第1个`，新断言找不到 `YYYYMM
     const fresh = new Set(found.filter((t) => !known.has(t)));
     if (known.size + fresh.size > MAX_PER_DAY) {
       return {
-        drop: `token-inbox：今日脱敏额度已满（${MAX_PER_DAY}），信息脱敏不可用；请执行 /token-flush 清空保险箱后重试`,
+        drop: `token-vault：今日脱敏额度已满（${MAX_PER_DAY}），信息脱敏不可用；请执行 /token-flush 清空保险箱后重试`,
       };
     }
     let text = e.text;
@@ -220,7 +220,7 @@ Expected: FAIL——旧实现占位符是 `第1个`，新断言找不到 `YYYYMM
         nums.push(n);
         known.set(t, n);
       }
-      text = text.replace(t, `[token-inbox:${n}已入箱脱敏;需要落值时调用vault-apply并传此编号]`);
+      text = text.replace(t, `[token-vault:${n}已入箱脱敏;需要落值时调用vault-apply并传此编号]`);
     }
     const evicted = planEvict(nums, MAX_KEYS);
     for (const n of evicted) await $.store.delete(`token:${n}`);
@@ -231,14 +231,14 @@ Expected: FAIL——旧实现占位符是 `第1个`，新断言找不到 `YYYYMM
     if (evicted.length > 0) parts.push(`淘汰最旧 ${evicted.length}`);
     $.ui.toast(
       parts.length
-        ? `token-inbox：截获 ${found.length} 个 token（${parts.join('，')}）`
-        : `token-inbox：截获 ${found.length} 个 token，均已入箱`,
+        ? `token-vault：截获 ${found.length} 个 token（${parts.join('，')}）`
+        : `token-vault：截获 ${found.length} 个 token，均已入箱`,
     );
     return next({ ...e, text });
   }).catch(async ($, e, next) => {
     // fail-closed：消息确实含 token 而脱敏没完成时宁可整体拦截，不放原文过。
     if (next.called || !e.text?.match(TOKEN_RE)) return next(e);
-    return { drop: 'token-inbox：消息疑似含 token 但脱敏失败，已整体拦截' };
+    return { drop: 'token-vault：消息疑似含 token 但脱敏失败，已整体拦截' };
   });
 ```
 
@@ -304,9 +304,9 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
     const token = 'gho_' + 'a'.repeat(30);
     await $.prompt.submit({ text: `token：${token}`, wait: false, origin: { kind: 'composer' } });
-    const short = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/a.env', index: `${todayPrefix()}-1` });
+    const short = await $.tool.call({ tool: 'mcp__token-vault__vault-apply', target: '/tmp/a.env', index: `${todayPrefix()}-1` });
     expect(JSON.stringify(short)).toContain('已写入');
-    const padded = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/b.env', index: `${todayPrefix()}-001` });
+    const padded = await $.tool.call({ tool: 'mcp__token-vault__vault-apply', target: '/tmp/b.env', index: `${todayPrefix()}-001` });
     expect(JSON.stringify(padded)).toContain('已写入');
   });
 
@@ -320,7 +320,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
     await $.prompt.submit({ text: `t1：${'sk-' + 'a'.repeat(23)}`, wait: false, origin: { kind: 'composer' } });
     await $.prompt.submit({ text: `t2：${'sk-' + 'b'.repeat(23)}`, wait: false, origin: { kind: 'composer' } });
-    const r = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/x.env' });
+    const r = await $.tool.call({ tool: 'mcp__token-vault__vault-apply', target: '/tmp/x.env' });
     expect(wrote).toBe(false);
     const s = JSON.stringify(r);
     expect(s).toContain('index');
@@ -333,7 +333,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
     on('fs.write', ($, e) => ({ value: undefined }));
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
     await $.prompt.submit({ text: `t：${'sk-' + 'c'.repeat(23)}`, wait: false, origin: { kind: 'composer' } });
-    const r = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/x.env', index: `${todayPrefix()}-002` });
+    const r = await $.tool.call({ tool: 'mcp__token-vault__vault-apply', target: '/tmp/x.env', index: `${todayPrefix()}-002` });
     const s = JSON.stringify(r);
     expect(s).toContain('不存在');
     expect(s).toContain('-001');
@@ -345,7 +345,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
     on('fs.write', ($, e) => ({ value: undefined }));
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
     await $.prompt.submit({ text: `t：${'sk-' + 'd'.repeat(23)}`, wait: false, origin: { kind: 'composer' } });
-    const r = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/x.env', index: '1' });
+    const r = await $.tool.call({ tool: 'mcp__token-vault__vault-apply', target: '/tmp/x.env', index: '1' });
     expect(JSON.stringify(r)).toContain('YYYYMMDD-NNN');
   });
 
@@ -358,7 +358,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
     on('tool.register', ($, e) => {
       const ev = e as { name?: string; inputSchema?: { properties?: { index?: { type?: string } } } };
       if (ev.name === 'vault-apply') indexType = ev.inputSchema?.properties?.index?.type ?? '';
-      return { value: { tool: 'mcp__token-inbox__vault-apply' } };
+      return { value: { tool: 'mcp__token-vault__vault-apply' } };
     });
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
     expect(indexType).toBe('string');
@@ -393,7 +393,7 @@ Expected: FAIL——短序号 `-1` 直查不中、多 token 省略 index 时旧�
     });
     await $.command.register({
       name: 'token-flush',
-      description: '清空 token-inbox 保险箱（当日脱敏额度满或保险箱异常时的恢复手段，日常无需使用）',
+      description: '清空 token-vault 保险箱（当日脱敏额度满或保险箱异常时的恢复手段，日常无需使用）',
     });
     return next(e);
   });
@@ -404,7 +404,7 @@ Expected: FAIL——短序号 `-1` 直查不中、多 token 省略 index 时旧�
 ```ts
   // 落值严格化：编号必须显式且存在，报错列出可用编号并禁止模型改用其他编号。
   // 缺省回退与淘汰后猜编号是"写错值"的全部来源，这里一并堵死。
-  on('tool.call', { tool: 'mcp__token-inbox__vault-apply' }, async ($, e, next) => {
+  on('tool.call', { tool: 'mcp__token-vault__vault-apply' }, async ($, e, next) => {
     const args = e as { target?: string; key?: string; index?: string };
     if (!args.target) {
       return { result: '缺少 target 参数' };
@@ -435,16 +435,16 @@ Expected: FAIL——短序号 `-1` 直查不中、多 token 省略 index 时旧�
         const r = await apply(nums[0]);
         if (r) return { result: r };
       }
-      return { result: `token-inbox：请提供 index（占位符中的入箱编号）。当前可用：${avail()}；禁止改用其他编号落值，缺哪个请让用户重发` };
+      return { result: `token-vault：请提供 index（占位符中的入箱编号）。当前可用：${avail()}；禁止改用其他编号落值，缺哪个请让用户重发` };
     }
     const m = args.index.match(/^(\d{8})-(\d{1,3})$/);
     if (!m) {
-      return { result: `token-inbox：编号格式应为 YYYYMMDD-NNN（如 ${today}-001）` };
+      return { result: `token-vault：编号格式应为 YYYYMMDD-NNN（如 ${today}-001）` };
     }
     const n = `${m[1]}-${m[2].padStart(3, '0')}`;
     const r = await apply(n);
     if (r) return { result: r };
-    return { result: `token-inbox：编号 ${n} 不存在（可能已被 FIFO 淘汰）。当前可用：${avail()}；禁止改用其他编号落值，请让用户重发该 token` };
+    return { result: `token-vault：编号 ${n} 不存在（可能已被 FIFO 淘汰）。当前可用：${avail()}；禁止改用其他编号落值，请让用户重发该 token` };
   });
 ```
 
@@ -479,7 +479,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 全文替换为：
 
 ````markdown
-# token-inbox
+# token-vault
 
 把消息里的 token（API 密钥、PAT 等）截入本地保险箱，对模型脱敏：真值不发给后端 LLM，但 Claude Code 可以用——模型调度落值动作，却读不到值。
 
@@ -488,13 +488,13 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 方式一（正式安装，终端会话里）：
 
 ```
-/plugin install token-inbox --marketplace /解包后的目录路径/token-inbox
+/plugin install token-vault --marketplace /解包后的目录路径/token-vault
 ```
 
 方式二（快速试用）：
 
 ```
-claude --plugin-dir /解包后的目录路径/token-inbox
+claude --plugin-dir /解包后的目录路径/token-vault
 ```
 
 ## 用法

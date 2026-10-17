@@ -1,4 +1,4 @@
-# token-inbox
+# token-vault
 
 把消息里的 token（API 密钥、PAT 等）截入本地保险箱，对模型脱敏：真值不发给后端 LLM，但 Claude Code 可以用——模型调度落值动作，却读不到值。
 
@@ -7,13 +7,13 @@
 方式一（正式安装，终端会话里）：
 
 ```
-/plugin install token-inbox --marketplace /解包后的目录路径/token-inbox
+/plugin install token-vault --marketplace /解包后的目录路径/token-vault
 ```
 
 方式二（快速试用）：
 
 ```
-claude --plugin-dir /解包后的目录路径/token-inbox
+claude --plugin-dir /解包后的目录路径/token-vault
 ```
 
 ## 用法

@@ -1,5 +1,5 @@
 {
-  "name": "token-inbox",
+  "name": "token-vault",
   "version": "0.1.0",
   "description": "把消息里的 token 截入本地保险箱并对模型脱敏；模型可调度 vault-apply 落值但读不到值",
   "author": { "name": "bhxch" }
