@@ -20,7 +20,9 @@ describe('token-inbox', () => {
     if ('drop' in r && r.drop) throw new Error(`不应拦截：${r.drop}`);
     expect(r.text).toBeTruthy();
     expect(r.text).not.toContain(token);
-    expect(r.text).toContain(`${todayPrefix()}-001已入箱脱敏`);
+    expect(r.text).toContain(
+      `[token-inbox:${todayPrefix()}-001已入箱脱敏;需要落值时调用vault-apply并传此编号]`,
+    );
   });
 
   test('无 token 的消息原样通过', async ($, on) => {
@@ -62,7 +64,10 @@ describe('token-inbox', () => {
   test('同一 token 重复发送：去重，引用既有编号，不新增存储', async ($, on) => {
     bottom(on);
     const token = 'sk-' + 'd'.repeat(25);
-    await $.prompt.submit({ text: `token：${token}`, wait: false, origin: { kind: 'composer' } });
+    const r1 = await $.prompt.submit({ text: `token：${token}，再发一遍：${token}`, wait: false, origin: { kind: 'composer' } });
+    if ('drop' in r1 && r1.drop) throw new Error(`不应拦截：${r1.drop}`);
+    expect(r1.text).not.toContain(token);
+    expect(r1.text.split(`${todayPrefix()}-001已入箱脱敏`).length - 1).toBe(2); // 同消息两处都替换且共用编号
     const r2 = await $.prompt.submit({ text: `再来一次 ${token}`, wait: false, origin: { kind: 'composer' } });
     if ('drop' in r2 && r2.drop) throw new Error(`不应拦截：${r2.drop}`);
     expect(r2.text).not.toContain(token);
@@ -82,7 +87,11 @@ describe('token-inbox', () => {
     expect(dupR.text).toContain(`${todayPrefix()}-1000已入箱脱敏`);
     // 新值 → 整体拦截，指路恢复命令
     const r = await $.prompt.submit({ text: `t：sk-new-${'z'.repeat(24)}`, wait: false, origin: { kind: 'composer' } });
-    expect('drop' in r && r.drop).toContain('/token-flush');
+    if (!('drop' in r) || !r.drop) throw new Error('第 1001 个新值应被整体拦截');
+    expect(r.drop).toContain('/token-flush');
+    // drop 零写入：被拦截的消息不得写入任何键（flush 计数仍应为 1000）
+    const f = await $.command.run({ command: 'token-flush', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } });
+    expect(f.text).toContain('1000 个');
   });
 
   test('/token-flush 恢复：清空后当天编号从 001 重新开始', async ($, on) => {
