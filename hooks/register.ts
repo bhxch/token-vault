@@ -37,18 +37,7 @@ export const register: Register = (on) => {
         required: ['target'],
       },
     });
-    await $.command.register({
-      name: 'token-flush',
-      description: '清空 token-vault 保险箱（当日脱敏额度满或保险箱异常时的恢复手段，日常无需使用）',
-    });
     return next(e);
-  });
-
-  // 用户手动清空保险箱。
-  on('command.run', { command: 'token-flush' }, async ($, e, next) => {
-    const keys = (await $.store.keys()).filter((k) => k.startsWith('token:'));
-    for (const k of keys) await $.store.delete(k);
-    return { text: `token-vault：保险箱已清空（删除 ${keys.length} 个 token）` };
   });
 
   // 落值严格化：编号必须显式且存在，报错列出可用编号并禁止模型改用其他编号。
@@ -87,7 +76,7 @@ export const register: Register = (on) => {
         const r = await apply(nums[0]);
         if (r) return { result: r };
         // 键在而值异常（正常流程不产生，仅手动改存储可触发）：不再重试，避免与
-        // 「提供 index」指引形成死循环，由用户 /token-flush 清理。
+        // 「提供 index」指引形成死循环，由用户删除存储文件清理。
       }
       return { result: `token-vault：请提供 index（占位符中的入箱编号）。当前可用：${avail()}；禁止改用其他编号落值，请让用户重发` };
     }
@@ -106,11 +95,11 @@ export const register: Register = (on) => {
   // 编号 YYYYMMDD-NNN：按天分区，每日从 001 起、当天内只增不复用；
   // 日期与序号均定宽，字符串排序即时间序。去重仅当天范围，跨天重发入新编号。
   // 全箱至多 MAX_KEYS 个键，超出按时间序 FIFO 淘汰最旧（无墓碑，查不到即没有）。
-  // 单日新值将超过 MAX_PER_DAY 时 fail-closed 整体拦截，由用户 /token-flush 恢复；
+  // 单日新值将超过 MAX_PER_DAY 时 fail-closed 整体拦截，报错指引删存储文件恢复；
   // 上限取 999 与 NNN 三位编号格式一致，编号恒为三位。
   // 升级前的存量纯数字键不参与当天去重与 nextN；其字符串序与时间序不对应
   // （'12' 排最前、'5' 排在全部日期键之后），过渡期 FIFO 顺序对它们不精确，
-  // 属已拍板的过渡取舍，必要时 /token-flush 一次清掉。
+  // 属已拍板的过渡取舍，必要时删除存储文件一次清掉。
   const MAX_PER_DAY = 999;
   const MAX_KEYS = 999;
 
@@ -137,7 +126,7 @@ export const register: Register = (on) => {
     const fresh = new Set(found.filter((t) => !known.has(t)));
     if (known.size + fresh.size > MAX_PER_DAY) {
       return {
-        drop: `token-vault：今日脱敏额度已满（${MAX_PER_DAY}），信息脱敏不可用；请执行 /token-flush 清空保险箱后重试`,
+        drop: `token-vault：今日脱敏额度已满（${MAX_PER_DAY}），信息脱敏不可用；请删除 ~/.claude/plugins/store/ 下 token-vault_ 开头的 JSON 文件（全箱清空）后重试`,
       };
     }
     let text = e.text;

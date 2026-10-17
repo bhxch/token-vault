@@ -9,7 +9,6 @@ const bottom = (on: On) => {
   on('prompt.submit', ($, e) => ({ text: e.text }));
   on('session.start', ($, e) => ({ cwd: e.cwd }));
   on('tool.register', () => ({ value: { tool: 'mcp__token-vault__vault-apply' } }));
-  on('command.register', () => ({ value: { command: 'token-flush' } }));
 };
 
 describe('token-vault', () => {
@@ -74,7 +73,7 @@ describe('token-vault', () => {
     expect(r2.text).toContain(`${todayPrefix()}-001已入箱脱敏`); // 复用当天既有编号
   });
 
-  test('单日额度：第 1000 个新值触发拦截并提示 /token-flush，额度内去重不受影响', async ($, on) => {
+  test('单日额度：第 1000 个新值触发拦截并指引删文件，额度内去重不受影响', async ($, on) => {
     bottom(on);
     // 一条消息灌满当日 999 个额度：宿主单用例 5s 超时，千次独立 submit 是 O(n²) 必超时
     const fill = (i: number) => `sk-fill${i}-${'x'.repeat(20)}`;
@@ -85,25 +84,14 @@ describe('token-vault', () => {
     const dupR = await $.prompt.submit({ text: `t：${fill(998)}`, wait: false, origin: { kind: 'composer' } });
     if ('drop' in dupR && dupR.drop) throw new Error(`去重不应拦截：${dupR.drop}`);
     expect(dupR.text).toContain(`${todayPrefix()}-999已入箱脱敏`);
-    // 新值 → 整体拦截，指路恢复命令
+    // 新值 → 整体拦截，指引自行删除存储文件恢复
     const r = await $.prompt.submit({ text: `t：sk-new-${'z'.repeat(24)}`, wait: false, origin: { kind: 'composer' } });
     if (!('drop' in r) || !r.drop) throw new Error('第 1000 个新值应被整体拦截');
-    expect(r.drop).toContain('/token-flush');
-    // drop 零写入：被拦截的消息不得写入任何键（flush 计数仍应为 999）
-    const f = await $.command.run({ command: 'token-flush', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } });
-    expect(f.text).toContain('999 个');
-  });
-
-  test('/token-flush 恢复：清空后当天编号从 001 重新开始', async ($, on) => {
-    bottom(on);
-    const token = 'glpat-' + 'b'.repeat(20);
-    await $.prompt.submit({ text: `token：${token}`, wait: false, origin: { kind: 'composer' } });
-    const r = await $.command.run({ command: 'token-flush', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } });
-    expect(r.text).toContain('已清空');
-    expect(r.text).toContain('1 个');
-    const r2 = await $.prompt.submit({ text: `token：${token}`, wait: false, origin: { kind: 'composer' } });
-    if ('drop' in r2 && r2.drop) throw new Error(`不应拦截：${r2.drop}`);
-    expect(r2.text).toContain(`${todayPrefix()}-001已入箱脱敏`);
+    expect(r.drop).toContain('store');
+    expect(r.drop).toContain('token-vault_');
+    // drop 零写入：被拦截的消息不得写入任何键——同值重发应再次拦截（若已写入则会去重放行）
+    const r2 = await $.prompt.submit({ text: `t：sk-new-${'z'.repeat(24)}`, wait: false, origin: { kind: 'composer' } });
+    if (!('drop' in r2) || !r2.drop) throw new Error('被拦截消息不应有写入（重发应仍拦截而非去重放行）');
   });
 
   test('落值：显式编号与短序号补零均落地', async ($, on) => {
@@ -193,7 +181,6 @@ describe('token-vault', () => {
     mock.store(on);
     on('prompt.submit', ($, e) => ({ text: e.text }));
     on('session.start', ($, e) => ({ cwd: e.cwd }));
-    on('command.register', () => ({ value: { command: 'token-flush' } }));
     let indexType = '';
     on('tool.register', ($, e) => {
       const ev = e as { name?: string; inputSchema?: { properties?: { index?: { type?: string } } } };
