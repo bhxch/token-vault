@@ -105,6 +105,72 @@ describe('token-inbox', () => {
     if ('drop' in r2 && r2.drop) throw new Error(`不应拦截：${r2.drop}`);
     expect(r2.text).toContain(`${todayPrefix()}-001已入箱脱敏`);
   });
+
+  test('落值：显式编号与短序号补零均落地', async ($, on) => {
+    bottom(on);
+    on('fs.write', ($, e) => ({ value: undefined }));
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
+    const token = 'gho_' + 'a'.repeat(30);
+    await $.prompt.submit({ text: `token：${token}`, wait: false, origin: { kind: 'composer' } });
+    const short = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/a.env', index: `${todayPrefix()}-1` });
+    expect(JSON.stringify(short)).toContain('已写入');
+    const padded = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/b.env', index: `${todayPrefix()}-001` });
+    expect(JSON.stringify(padded)).toContain('已写入');
+  });
+
+  test('落值：省略 index 且箱内多个 token → 报错列可用编号，不落地', async ($, on) => {
+    bottom(on);
+    let wrote = false;
+    on('fs.write', ($, e) => {
+      wrote = true;
+      return { value: undefined };
+    });
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
+    await $.prompt.submit({ text: `t1：${'sk-' + 'a'.repeat(23)}`, wait: false, origin: { kind: 'composer' } });
+    await $.prompt.submit({ text: `t2：${'sk-' + 'b'.repeat(23)}`, wait: false, origin: { kind: 'composer' } });
+    const r = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/x.env' });
+    expect(wrote).toBe(false);
+    const s = JSON.stringify(r);
+    expect(s).toContain('index');
+    expect(s).toContain('-001');
+    expect(s).toContain('-002');
+  });
+
+  test('落值：编号不存在 → 报不存在并列可用编号，提示禁止改用', async ($, on) => {
+    bottom(on);
+    on('fs.write', ($, e) => ({ value: undefined }));
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
+    await $.prompt.submit({ text: `t：${'sk-' + 'c'.repeat(23)}`, wait: false, origin: { kind: 'composer' } });
+    const r = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/x.env', index: `${todayPrefix()}-002` });
+    const s = JSON.stringify(r);
+    expect(s).toContain('不存在');
+    expect(s).toContain('-001');
+    expect(s).toContain('禁止改用');
+  });
+
+  test('落值：旧格式纯数字编号 → 报格式错误', async ($, on) => {
+    bottom(on);
+    on('fs.write', ($, e) => ({ value: undefined }));
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
+    await $.prompt.submit({ text: `t：${'sk-' + 'd'.repeat(23)}`, wait: false, origin: { kind: 'composer' } });
+    const r = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/x.env', index: '1' });
+    expect(JSON.stringify(r)).toContain('YYYYMMDD-NNN');
+  });
+
+  test('注册：vault-apply 的 index 参数为 string', async ($, on) => {
+    mock.store(on);
+    on('prompt.submit', ($, e) => ({ text: e.text }));
+    on('session.start', ($, e) => ({ cwd: e.cwd }));
+    on('command.register', () => ({ value: { command: 'token-flush' } }));
+    let indexType = '';
+    on('tool.register', ($, e) => {
+      const ev = e as { name?: string; inputSchema?: { properties?: { index?: { type?: string } } } };
+      if (ev.name === 'vault-apply') indexType = ev.inputSchema?.properties?.index?.type ?? '';
+      return { value: { tool: 'mcp__token-inbox__vault-apply' } };
+    });
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
+    expect(indexType).toBe('string');
+  });
 });
 
 describe('token-inbox 纯函数', () => {

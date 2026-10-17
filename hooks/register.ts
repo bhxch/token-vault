@@ -21,25 +21,25 @@ const TOKEN_RE =
   /(ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|ghu_[A-Za-z0-9]{20,}|ghs_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{24,}|sk-[A-Za-z0-9_-]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})/g;
 
 export const register: Register = (on) => {
-  // 模型可调用的落值工具：参数只有目标路径和变量名，值始终留在本地保险箱。
+  // 模型可调用的落值工具：参数只有目标路径、变量名和入箱编号，值始终留在本地保险箱。
   on('session.start', async ($, e, next) => {
     await $.tool.register({
       name: 'vault-apply',
       description:
-        '把用户存入本地保险箱的 token 写入目标文件（一行 KEY=value）。token 的值对模型不可见，模型只提供路径和变量名。',
+        '把用户存入本地保险箱的 token 写入目标文件（一行 KEY=value）。token 的值对模型不可见，模型只提供路径、变量名和入箱编号。',
       inputSchema: {
         type: 'object',
         properties: {
           target: { type: 'string', description: '目标文件的绝对路径' },
           key: { type: 'string', description: '变量名，默认 TOKEN' },
-          index: { type: 'number', description: '第几个入箱的 token，默认 1' },
+          index: { type: 'string', description: '占位符中的入箱编号，如 20261017-001；箱内仅一个 token 时可省略' },
         },
         required: ['target'],
       },
     });
     await $.command.register({
       name: 'token-flush',
-      description: '清空 token-inbox 保险箱中保存的全部 token',
+      description: '清空 token-inbox 保险箱（当日脱敏额度满或保险箱异常时的恢复手段，日常无需使用）',
     });
     return next(e);
   });
@@ -51,24 +51,49 @@ export const register: Register = (on) => {
     return { text: `token-inbox：保险箱已清空（删除 ${keys.length} 个 token）` };
   });
 
+  // 落值严格化：编号必须显式且存在，报错列出可用编号并禁止模型改用其他编号。
+  // 缺省回退与淘汰后猜编号是"写错值"的全部来源，这里一并堵死。
   on('tool.call', { tool: 'mcp__token-inbox__vault-apply' }, async ($, e, next) => {
     const args = e as { target?: string; key?: string; index?: string };
     if (!args.target) {
       return { result: '缺少 target 参数' };
     }
-    // 过渡版查找：显式编号直查；省略时仅当箱内唯一才落地。
-    const keys = (await $.store.keys()).filter((k) => k.startsWith('token:'));
-    const value = args.index
-      ? await $.store.get(`token:${args.index}`)
-      : keys.length === 1
-        ? await $.store.get(keys[0])
-        : undefined;
-    if (typeof value !== 'string' || !value) {
-      return { result: '保险箱里没有这个 token：请用户把 token 直接发在消息里，会自动入箱脱敏' };
+    const nums = (await $.store.keys())
+      .filter((k) => k.startsWith('token:'))
+      .map((k) => k.slice('token:'.length))
+      .sort();
+    const today = todayPrefix();
+    const avail = () => {
+      const ordered = [
+        ...nums.filter((n) => n.startsWith(`${today}-`)),
+        ...nums.filter((n) => !n.startsWith(`${today}-`)),
+      ];
+      if (!ordered.length) return '（保险箱为空：请用户把 token 直接发在消息里，会自动入箱脱敏）';
+      const shown = ordered.slice(0, 20).join('、');
+      return ordered.length > 20 ? `${shown}…等 ${ordered.length} 个` : shown;
+    };
+    const apply = async (n: string) => {
+      const value = await $.store.get(`token:${n}`);
+      if (typeof value !== 'string' || !value) return undefined;
+      const key = args.key ?? 'TOKEN';
+      await $.fs.write(args.target!, `${key}=${value}\n`);
+      return `已写入 ${key}=***（${value.length} 字符）到 ${args.target}，值未经过模型`;
+    };
+    if (!args.index) {
+      if (nums.length === 1) {
+        const r = await apply(nums[0]);
+        if (r) return { result: r };
+      }
+      return { result: `token-inbox：请提供 index（占位符中的入箱编号）。当前可用：${avail()}；禁止改用其他编号落值，缺哪个请让用户重发` };
     }
-    const key = args.key ?? 'TOKEN';
-    await $.fs.write(args.target, `${key}=${value}\n`);
-    return { result: `已写入 ${key}=***（${value.length} 字符）到 ${args.target}，值未经过模型` };
+    const m = args.index.match(/^(\d{8})-(\d{1,3})$/);
+    if (!m) {
+      return { result: `token-inbox：编号格式应为 YYYYMMDD-NNN（如 ${today}-001）` };
+    }
+    const n = `${m[1]}-${m[2].padStart(3, '0')}`;
+    const r = await apply(n);
+    if (r) return { result: r };
+    return { result: `token-inbox：编号 ${n} 不存在（可能已被 FIFO 淘汰）。当前可用：${avail()}；禁止改用其他编号落值，请让用户重发该 token` };
   });
 
   // 入口脱敏：带 token 的消息在进入会话前把值换成占位符，真值进 $.store，
