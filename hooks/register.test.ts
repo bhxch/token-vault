@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing';
 import type { On } from 'claude-code';
+import { todayPrefix, pad3, planEvict } from './register';
 
 // 测试宿主不自带事件底座：事件由测试回答（在所有插件之下），
 // mod 钩子在其上方跑，改写与副作用从链上验证。
@@ -95,5 +96,32 @@ describe('token-inbox', () => {
     const r2 = await $.prompt.submit({ text: `t：${first}`, wait: false, origin: { kind: 'composer' } });
     if ('drop' in r2 && r2.drop) throw new Error(`不应拦截：${r2.drop}`);
     expect(r2.text).toContain('第102个');
+  });
+});
+
+describe('token-inbox 纯函数', () => {
+  test('todayPrefix：本地日期 YYYYMMDD', async () => {
+    expect(todayPrefix(new Date('2026-10-17T15:00:00'))).toBe('20261017');
+    expect(todayPrefix(new Date('2026-01-02T00:30:00'))).toBe('20260102');
+  });
+
+  test('pad3：三位定宽补零', async () => {
+    expect(pad3(1)).toBe('001');
+    expect(pad3(42)).toBe('042');
+    expect(pad3(999)).toBe('999');
+  });
+
+  test('planEvict：未超限返回空，超限按字符串序淘汰最旧', async () => {
+    expect(planEvict(['20261017-001'], 1000)).toEqual([]);
+    const nums = ['20261016-003', '20261017-001', '20261016-001', '20261016-002'];
+    expect(planEvict(nums, 4)).toEqual([]);
+    expect(planEvict(nums, 3)).toEqual(['20261016-001']);
+    expect(planEvict(nums, 2)).toEqual(['20261016-001', '20261016-002']);
+  });
+
+  test('planEvict：不修改入参', async () => {
+    const nums = ['20261017-002', '20261017-001'];
+    planEvict(nums, 1);
+    expect(nums).toEqual(['20261017-002', '20261017-001']);
   });
 });

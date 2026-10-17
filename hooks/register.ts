@@ -1,5 +1,19 @@
 import type { Register } from 'claude-code';
 
+// 当日本地日期前缀（YYYYMMDD）。编号按天分区，跨天自动重新从 001 计数。
+export const todayPrefix = (d = new Date()): string => {
+  const p = (x: number) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+};
+
+export const pad3 = (n: number): string => String(n).padStart(3, '0');
+
+// 全箱 FIFO 淘汰计划：日期与序号均定宽，编号字符串排序即时间序，
+// 超出上限时淘汰最旧的一批。抽成纯函数直接单测——事件级构造 >1000 键
+// 需要真实跨日时钟，不值得为此引入时钟注入。
+export const planEvict = (nums: string[], cap: number): string[] =>
+  nums.length <= cap ? [] : [...nums].sort().slice(0, nums.length - cap);
+
 // 常见 token 形态：GitHub PAT（经典/细粒度/各前缀）、Anthropic key、通用 sk-、
 // GitLab PAT、Slack token。长度取下限贪婪匹配——超出标称长度的尾部一并截获，
 // 不假设 token 恰好是文档标称长度。命中即截获入箱，原文中的值全部替换为占位符。
