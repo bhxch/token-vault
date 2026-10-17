@@ -178,6 +178,17 @@ describe('token-inbox', () => {
     expect(s).toContain('等 21 个');
   });
 
+  test('落值：index 违反 schema 传非字符串 → 结构化报错而非崩溃', async ($, on) => {
+    bottom(on);
+    on('fs.write', ($, e) => ({ value: undefined }));
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
+    await $.prompt.submit({ text: `t：${'sk-' + 'e'.repeat(23)}`, wait: false, origin: { kind: 'composer' } });
+    const r = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/x.env', index: 1 });
+    const s = JSON.stringify(r);
+    expect(s).toContain('YYYYMMDD-NNN');
+    expect(s).toContain('禁止改用');
+  });
+
   test('注册：vault-apply 的 index 参数为 string', async ($, on) => {
     mock.store(on);
     on('prompt.submit', ($, e) => ({ text: e.text }));

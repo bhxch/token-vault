@@ -32,7 +32,7 @@ export const register: Register = (on) => {
         properties: {
           target: { type: 'string', description: '目标文件的绝对路径' },
           key: { type: 'string', description: '变量名，默认 TOKEN' },
-          index: { type: 'string', description: '占位符中的入箱编号，如 20261017-001；箱内仅一个 token 时可省略' },
+          index: { type: 'string', description: '占位符中的入箱编号（YYYYMMDD-NNN，如 20260101-001）；箱内仅一个 token 时可省略' },
         },
         required: ['target'],
       },
@@ -79,7 +79,10 @@ export const register: Register = (on) => {
       await $.fs.write(args.target!, `${key}=${value}\n`);
       return `已写入 ${key}=***（${value.length} 字符）到 ${args.target}，值未经过模型`;
     };
-    if (!args.index) {
+    // index 违反 schema 传成非字符串（如 JSON number）时归一为字符串走格式报错，
+    // 而不是让 match 抛 TypeError 落进宿主的晦涩 HooksError、断掉恢复指引。
+    const idx = args.index === undefined || args.index === null ? '' : String(args.index);
+    if (!idx) {
       if (nums.length === 1) {
         const r = await apply(nums[0]);
         if (r) return { result: r };
@@ -88,7 +91,7 @@ export const register: Register = (on) => {
       }
       return { result: `token-inbox：请提供 index（占位符中的入箱编号）。当前可用：${avail()}；禁止改用其他编号落值，请让用户重发` };
     }
-    const m = args.index.match(/^(\d{8})-(\d{1,3})$/);
+    const m = idx.match(/^(\d{8})-(\d{1,3})$/);
     if (!m) {
       return { result: `token-inbox：编号格式应为 YYYYMMDD-NNN。当前可用：${avail()}；禁止改用其他编号落值，请让用户重发` };
     }
