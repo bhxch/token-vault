@@ -56,7 +56,7 @@ export const register: Register = (on) => {
   on('tool.call', { tool: 'mcp__token-inbox__vault-apply' }, async ($, e, next) => {
     const args = e as { target?: string; key?: string; index?: string };
     if (!args.target) {
-      return { result: '缺少 target 参数' };
+      return { result: 'token-inbox：缺少 target 参数' };
     }
     const nums = (await $.store.keys())
       .filter((k) => k.startsWith('token:'))
@@ -83,12 +83,14 @@ export const register: Register = (on) => {
       if (nums.length === 1) {
         const r = await apply(nums[0]);
         if (r) return { result: r };
+        // 键在而值异常（正常流程不产生，仅手动改存储可触发）：不再重试，避免与
+        // 「提供 index」指引形成死循环，由用户 /token-flush 清理。
       }
-      return { result: `token-inbox：请提供 index（占位符中的入箱编号）。当前可用：${avail()}；禁止改用其他编号落值，缺哪个请让用户重发` };
+      return { result: `token-inbox：请提供 index（占位符中的入箱编号）。当前可用：${avail()}；禁止改用其他编号落值，请让用户重发` };
     }
     const m = args.index.match(/^(\d{8})-(\d{1,3})$/);
     if (!m) {
-      return { result: `token-inbox：编号格式应为 YYYYMMDD-NNN（如 ${today}-001）` };
+      return { result: `token-inbox：编号格式应为 YYYYMMDD-NNN。当前可用：${avail()}；禁止改用其他编号落值，请让用户重发` };
     }
     const n = `${m[1]}-${m[2].padStart(3, '0')}`;
     const r = await apply(n);

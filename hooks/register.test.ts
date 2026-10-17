@@ -108,7 +108,11 @@ describe('token-inbox', () => {
 
   test('落值：显式编号与短序号补零均落地', async ($, on) => {
     bottom(on);
-    on('fs.write', ($, e) => ({ value: undefined }));
+    const writes: string[] = [];
+    on('fs.write', ($, e) => {
+      writes.push((e as { text: string }).text);
+      return { value: undefined };
+    });
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
     const token = 'gho_' + 'a'.repeat(30);
     await $.prompt.submit({ text: `token：${token}`, wait: false, origin: { kind: 'composer' } });
@@ -116,6 +120,8 @@ describe('token-inbox', () => {
     expect(JSON.stringify(short)).toContain('已写入');
     const padded = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/b.env', index: `${todayPrefix()}-001` });
     expect(JSON.stringify(padded)).toContain('已写入');
+    expect(writes[0]).toBe(`TOKEN=${token}\n`);
+    expect(writes[1]).toBe(`TOKEN=${token}\n`);
   });
 
   test('落值：省略 index 且箱内多个 token → 报错列可用编号，不落地', async ($, on) => {
@@ -154,7 +160,22 @@ describe('token-inbox', () => {
     await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
     await $.prompt.submit({ text: `t：${'sk-' + 'd'.repeat(23)}`, wait: false, origin: { kind: 'composer' } });
     const r = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/x.env', index: '1' });
-    expect(JSON.stringify(r)).toContain('YYYYMMDD-NNN');
+    const s = JSON.stringify(r);
+    expect(s).toContain('YYYYMMDD-NNN');
+    expect(s).toContain('禁止改用');
+    expect(s).toContain('-001');
+  });
+
+  test('落值：可用编号超 20 个截断为「…等 N 个」', async ($, on) => {
+    bottom(on);
+    on('fs.write', ($, e) => ({ value: undefined }));
+    await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false });
+    const tokens = Array.from({ length: 21 }, (_, i) => `sk-p${i}-${'x'.repeat(20)}`);
+    await $.prompt.submit({ text: `批量：${tokens.join(' ')}`, wait: false, origin: { kind: 'composer' } });
+    const r = await $.tool.call({ tool: 'mcp__token-inbox__vault-apply', target: '/tmp/x.env', index: `${todayPrefix()}-099` });
+    const s = JSON.stringify(r);
+    expect(s).toContain('不存在');
+    expect(s).toContain('等 21 个');
   });
 
   test('注册：vault-apply 的 index 参数为 string', async ($, on) => {
