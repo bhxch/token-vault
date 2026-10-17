@@ -74,24 +74,24 @@ describe('token-inbox', () => {
     expect(r2.text).toContain(`${todayPrefix()}-001已入箱脱敏`); // 复用当天既有编号
   });
 
-  test('单日额度：第 1001 个新值触发拦截并提示 /token-flush，额度内去重不受影响', async ($, on) => {
+  test('单日额度：第 1000 个新值触发拦截并提示 /token-flush，额度内去重不受影响', async ($, on) => {
     bottom(on);
-    // 一条消息灌满当日 1000 个额度：宿主单用例 5s 超时，1000 次独立 submit 是 O(n²) 必超时
+    // 一条消息灌满当日 999 个额度：宿主单用例 5s 超时，千次独立 submit 是 O(n²) 必超时
     const fill = (i: number) => `sk-fill${i}-${'x'.repeat(20)}`;
-    const bulk = await $.prompt.submit({ text: `t：${Array.from({ length: 1000 }, (_, i) => fill(i)).join(' ')}`, wait: false, origin: { kind: 'composer' } });
+    const bulk = await $.prompt.submit({ text: `t：${Array.from({ length: 999 }, (_, i) => fill(i)).join(' ')}`, wait: false, origin: { kind: 'composer' } });
     if ('drop' in bulk && bulk.drop) throw new Error(`额度内不应拦截：${bulk.drop}`);
-    expect(bulk.text).toContain(`${todayPrefix()}-1000已入箱脱敏`);
+    expect(bulk.text).toContain(`${todayPrefix()}-999已入箱脱敏`);
     // 额度已满时，已有 token 的重复发送仍正常去重
-    const dupR = await $.prompt.submit({ text: `t：${fill(999)}`, wait: false, origin: { kind: 'composer' } });
+    const dupR = await $.prompt.submit({ text: `t：${fill(998)}`, wait: false, origin: { kind: 'composer' } });
     if ('drop' in dupR && dupR.drop) throw new Error(`去重不应拦截：${dupR.drop}`);
-    expect(dupR.text).toContain(`${todayPrefix()}-1000已入箱脱敏`);
+    expect(dupR.text).toContain(`${todayPrefix()}-999已入箱脱敏`);
     // 新值 → 整体拦截，指路恢复命令
     const r = await $.prompt.submit({ text: `t：sk-new-${'z'.repeat(24)}`, wait: false, origin: { kind: 'composer' } });
-    if (!('drop' in r) || !r.drop) throw new Error('第 1001 个新值应被整体拦截');
+    if (!('drop' in r) || !r.drop) throw new Error('第 1000 个新值应被整体拦截');
     expect(r.drop).toContain('/token-flush');
-    // drop 零写入：被拦截的消息不得写入任何键（flush 计数仍应为 1000）
+    // drop 零写入：被拦截的消息不得写入任何键（flush 计数仍应为 999）
     const f = await $.command.run({ command: 'token-flush', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } });
-    expect(f.text).toContain('1000 个');
+    expect(f.text).toContain('999 个');
   });
 
   test('/token-flush 恢复：清空后当天编号从 001 重新开始', async ($, on) => {

@@ -9,7 +9,7 @@ export const todayPrefix = (d = new Date()): string => {
 export const pad3 = (n: number): string => String(n).padStart(3, '0');
 
 // 全箱 FIFO 淘汰计划：日期与序号均定宽，编号字符串排序即时间序，
-// 超出上限时淘汰最旧的一批。抽成纯函数直接单测——事件级构造 >1000 键
+// 超出上限时淘汰最旧的一批。抽成纯函数直接单测——事件级构造 >999 键
 // 需要真实跨日时钟，不值得为此引入时钟注入。
 export const planEvict = (nums: string[], cap: number): string[] =>
   nums.length <= cap ? [] : [...nums].sort().slice(0, nums.length - cap);
@@ -106,13 +106,13 @@ export const register: Register = (on) => {
   // 编号 YYYYMMDD-NNN：按天分区，每日从 001 起、当天内只增不复用；
   // 日期与序号均定宽，字符串排序即时间序。去重仅当天范围，跨天重发入新编号。
   // 全箱至多 MAX_KEYS 个键，超出按时间序 FIFO 淘汰最旧（无墓碑，查不到即没有）。
-  // 单日新值将超过 MAX_PER_DAY 时 fail-closed 整体拦截，由用户 /token-flush 恢复。
-  // 已知取舍：第 1000 个编号为 -1000（四位），不做特判（用户确认暂不考虑）；
+  // 单日新值将超过 MAX_PER_DAY 时 fail-closed 整体拦截，由用户 /token-flush 恢复；
+  // 上限取 999 与 NNN 三位编号格式一致，编号恒为三位。
   // 升级前的存量纯数字键不参与当天去重与 nextN；其字符串序与时间序不对应
   // （'12' 排最前、'5' 排在全部日期键之后），过渡期 FIFO 顺序对它们不精确，
   // 属已拍板的过渡取舍，必要时 /token-flush 一次清掉。
-  const MAX_PER_DAY = 1000;
-  const MAX_KEYS = 1000;
+  const MAX_PER_DAY = 999;
+  const MAX_KEYS = 999;
 
   on('prompt.submit', async ($, e, next) => {
     if (e.command) return next(e);
