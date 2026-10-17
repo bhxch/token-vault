@@ -52,11 +52,17 @@ export const register: Register = (on) => {
   });
 
   on('tool.call', { tool: 'mcp__token-inbox__vault-apply' }, async ($, e, next) => {
-    const args = e as { target?: string; key?: string; index?: number };
+    const args = e as { target?: string; key?: string; index?: string };
     if (!args.target) {
       return { result: '缺少 target 参数' };
     }
-    const value = await $.store.get(`token:${args.index ?? 1}`);
+    // 过渡版查找：显式编号直查；省略时仅当箱内唯一才落地。
+    const keys = (await $.store.keys()).filter((k) => k.startsWith('token:'));
+    const value = args.index
+      ? await $.store.get(`token:${args.index}`)
+      : keys.length === 1
+        ? await $.store.get(keys[0])
+        : undefined;
     if (typeof value !== 'string' || !value) {
       return { result: '保险箱里没有这个 token：请用户把 token 直接发在消息里，会自动入箱脱敏' };
     }
@@ -65,57 +71,64 @@ export const register: Register = (on) => {
     return { result: `已写入 ${key}=***（${value.length} 字符）到 ${args.target}，值未经过模型` };
   });
 
-  // 入口脱敏：带 token 的消息在进入会话前把值换成占位符，
-  // 模型与 transcript 从头到尾只见占位符，真值进 $.store。
-  // 去重：同一真值只存一次，重复出现引用既有编号。
-  // 容量：至多 MAX_TOKENS 个，满了 FIFO 淘汰最旧——$.store 有 4MiB 硬上限，
-  // set 一旦 reject，fail-closed 会把带 token 的消息整体拦掉，不能让箱满挡路。
-  // 编号只增不复用（nextN = max+1），淘汰腾出的号不补，防止撞上未淘汰的编号。
-  const MAX_TOKENS = 100;
+  // 入口脱敏：带 token 的消息在进入会话前把值换成占位符，真值进 $.store，
+  // 模型与 transcript 从头到尾只见占位符。
+  // 编号 YYYYMMDD-NNN：按天分区，每日从 001 起、当天内只增不复用；
+  // 日期与序号均定宽，字符串排序即时间序。去重仅当天范围，跨天重发入新编号。
+  // 全箱至多 MAX_KEYS 个键，超出按时间序 FIFO 淘汰最旧（无墓碑，查不到即没有）。
+  // 单日新值将超过 MAX_PER_DAY 时 fail-closed 整体拦截，由用户 /token-flush 恢复。
+  // 已知取舍：第 1000 个编号为 -1000（四位），不做特判（用户确认暂不考虑）；
+  // 升级前的存量纯数字键不参与当天去重，排序上也视为最旧之前，属已拍板的过渡取舍。
+  const MAX_PER_DAY = 1000;
+  const MAX_KEYS = 1000;
 
   on('prompt.submit', async ($, e, next) => {
     if (e.command) return next(e);
     const found = e.text.match(TOKEN_RE);
     if (!found?.length) return next(e);
-    const known = new Map<string, number>(); // 真值 → 编号
+    const today = todayPrefix();
+    const known = new Map<string, string>(); // 真值 → 编号（仅当天）
+    const nums: string[] = []; // 全箱编号，字符串升序即时间序
     let nextN = 0;
-    const oldest: number[] = []; // 现有编号，升序即入箱序
-    for (const k of (await $.store.keys()).filter((k) => k.startsWith('token:'))) {
-      const v = await $.store.get(k);
-      if (typeof v !== 'string') continue;
-      const n = Number(k.slice('token:'.length));
-      known.set(v, n);
-      if (n > nextN) nextN = n;
-      oldest.push(n);
+    for (const k of await $.store.keys()) {
+      if (!k.startsWith('token:')) continue;
+      const n = k.slice('token:'.length);
+      nums.push(n);
+      if (n.startsWith(`${today}-`)) {
+        const v = await $.store.get(k);
+        if (typeof v === 'string') known.set(v, n);
+        const m = Number(n.slice(today.length + 1));
+        if (m > nextN) nextN = m;
+      }
     }
-    oldest.sort((a, b) => a - b);
+    // 单日额度预检：本条消息的全部新值都要能入箱才动手，避免拦一半留一半。
+    const fresh = new Set(found.filter((t) => !known.has(t)));
+    if (known.size + fresh.size > MAX_PER_DAY) {
+      return {
+        drop: `token-inbox：今日脱敏额度已满（${MAX_PER_DAY}），信息脱敏不可用；请执行 /token-flush 清空保险箱后重试`,
+      };
+    }
     let text = e.text;
     let added = 0;
-    let evicted = 0;
     for (const t of found) {
       let n = known.get(t);
       if (n === undefined) {
-        if (known.size >= MAX_TOKENS) {
-          const evict = oldest.splice(0, known.size - MAX_TOKENS + 1);
-          for (const m of evict) {
-            await $.store.delete(`token:${m}`);
-            for (const [v, k] of known) if (k === m) { known.delete(v); break; }
-          }
-          evicted += evict.length;
-        }
         added += 1;
         nextN += 1;
-        n = nextN;
+        n = `${today}-${pad3(nextN)}`;
         await $.store.set(`token:${n}`, t);
+        nums.push(n);
         known.set(t, n);
       }
-      text = text.replace(t, `[token-inbox:第${n}个token已入箱脱敏;需要落值时调用vault-apply]`);
+      text = text.replace(t, `[token-inbox:${n}已入箱脱敏;需要落值时调用vault-apply并传此编号]`);
     }
+    const evicted = planEvict(nums, MAX_KEYS);
+    for (const n of evicted) await $.store.delete(`token:${n}`);
     const dup = found.length - added;
     const parts: string[] = [];
     if (added > 0) parts.push(`新入箱 ${added}`);
     if (dup > 0) parts.push(`去重 ${dup}`);
-    if (evicted > 0) parts.push(`淘汰最旧 ${evicted}`);
+    if (evicted.length > 0) parts.push(`淘汰最旧 ${evicted.length}`);
     $.ui.toast(
       parts.length
         ? `token-inbox：截获 ${found.length} 个 token（${parts.join('，')}）`

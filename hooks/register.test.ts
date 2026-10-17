@@ -20,7 +20,7 @@ describe('token-inbox', () => {
     if ('drop' in r && r.drop) throw new Error(`不应拦截：${r.drop}`);
     expect(r.text).toBeTruthy();
     expect(r.text).not.toContain(token);
-    expect(r.text).toContain('token-inbox');
+    expect(r.text).toContain(`${todayPrefix()}-001已入箱脱敏`);
   });
 
   test('无 token 的消息原样通过', async ($, on) => {
@@ -66,10 +66,26 @@ describe('token-inbox', () => {
     const r2 = await $.prompt.submit({ text: `再来一次 ${token}`, wait: false, origin: { kind: 'composer' } });
     if ('drop' in r2 && r2.drop) throw new Error(`不应拦截：${r2.drop}`);
     expect(r2.text).not.toContain(token);
-    expect(r2.text).toContain('第1个'); // 复用编号而非新增第2个
+    expect(r2.text).toContain(`${todayPrefix()}-001已入箱脱敏`); // 复用当天既有编号
   });
 
-  test('/token-flush 清空保险箱后，同 token 重新从第1个编号', async ($, on) => {
+  test('单日额度：第 1001 个新值触发拦截并提示 /token-flush，额度内去重不受影响', async ($, on) => {
+    bottom(on);
+    // 一条消息灌满当日 1000 个额度：宿主单用例 5s 超时，1000 次独立 submit 是 O(n²) 必超时
+    const fill = (i: number) => `sk-fill${i}-${'x'.repeat(20)}`;
+    const bulk = await $.prompt.submit({ text: `t：${Array.from({ length: 1000 }, (_, i) => fill(i)).join(' ')}`, wait: false, origin: { kind: 'composer' } });
+    if ('drop' in bulk && bulk.drop) throw new Error(`额度内不应拦截：${bulk.drop}`);
+    expect(bulk.text).toContain(`${todayPrefix()}-1000已入箱脱敏`);
+    // 额度已满时，已有 token 的重复发送仍正常去重
+    const dupR = await $.prompt.submit({ text: `t：${fill(999)}`, wait: false, origin: { kind: 'composer' } });
+    if ('drop' in dupR && dupR.drop) throw new Error(`去重不应拦截：${dupR.drop}`);
+    expect(dupR.text).toContain(`${todayPrefix()}-1000已入箱脱敏`);
+    // 新值 → 整体拦截，指路恢复命令
+    const r = await $.prompt.submit({ text: `t：sk-new-${'z'.repeat(24)}`, wait: false, origin: { kind: 'composer' } });
+    expect('drop' in r && r.drop).toContain('/token-flush');
+  });
+
+  test('/token-flush 恢复：清空后当天编号从 001 重新开始', async ($, on) => {
     bottom(on);
     const token = 'glpat-' + 'b'.repeat(20);
     await $.prompt.submit({ text: `token：${token}`, wait: false, origin: { kind: 'composer' } });
@@ -78,24 +94,7 @@ describe('token-inbox', () => {
     expect(r.text).toContain('1 个');
     const r2 = await $.prompt.submit({ text: `token：${token}`, wait: false, origin: { kind: 'composer' } });
     if ('drop' in r2 && r2.drop) throw new Error(`不应拦截：${r2.drop}`);
-    expect(r2.text).toContain('第1个');
-  });
-
-  test('超过上限：淘汰最旧，新编号不复用被淘汰的编号', async ($, on) => {
-    bottom(on);
-    // 上限 100：灌入 100 个后，第 101 个触发淘汰最旧（token:1）
-    const first = 'sk-first-' + 'a'.repeat(20);
-    await $.prompt.submit({ text: `t：${first}`, wait: false, origin: { kind: 'composer' } });
-    for (let i = 0; i < 99; i++) {
-      await $.prompt.submit({ text: `t：sk-fill${i}-${'x'.repeat(20)}`, wait: false, origin: { kind: 'composer' } });
-    }
-    const r = await $.prompt.submit({ text: `t：sk-new-${'z'.repeat(24)}`, wait: false, origin: { kind: 'composer' } });
-    if ('drop' in r && r.drop) throw new Error(`不应拦截：${r.drop}`);
-    expect(r.text).toContain('第101个'); // 编号继续增长，不撞被淘汰的 1
-    // 最旧的已淘汰：再发它应重新入箱为新编号
-    const r2 = await $.prompt.submit({ text: `t：${first}`, wait: false, origin: { kind: 'composer' } });
-    if ('drop' in r2 && r2.drop) throw new Error(`不应拦截：${r2.drop}`);
-    expect(r2.text).toContain('第102个');
+    expect(r2.text).toContain(`${todayPrefix()}-001已入箱脱敏`);
   });
 });
 
